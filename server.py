@@ -182,6 +182,20 @@ TABLE_SCHEMAS = {
             issue_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             certificate_url TEXT
         )
+    """,
+    "session_progress": """
+        CREATE TABLE IF NOT EXISTS session_progress (
+            id TEXT PRIMARY KEY, 
+            user_id TEXT, 
+            session_id TEXT, 
+            course_id TEXT, 
+            module_id TEXT, 
+            completed BOOLEAN DEFAULT FALSE, 
+            time_spent_minutes INTEGER DEFAULT 0, 
+            completed_at TIMESTAMP, 
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, 
+            UNIQUE(user_id, session_id)
+        )
     """
 }
 
@@ -414,6 +428,7 @@ def get_course(cid: str, db=Depends(get_db), user=Depends(get_current_user)):
         raise HTTPException(404, "Course not found")
         
     # Fetch all sessions for this course to calculate module stats
+    cur.execute(TABLE_SCHEMAS["sessions"])
     cur.execute("SELECT module_id, duration_minutes FROM sessions WHERE course_id=%s", (cid,))
     all_sessions = cur.fetchall()
     
@@ -654,7 +669,8 @@ def get_course_progress(cid: str, user=Depends(get_current_user), db=Depends(get
         total_sessions = cur.fetchone()["count"]
         
         # Get completed sessions
-        cur.execute(TABLE_SCHEMAS.get("session_progress", "CREATE TABLE IF NOT EXISTS session_progress (id TEXT PRIMARY KEY, user_id TEXT, session_id TEXT, course_id TEXT, module_id TEXT, completed BOOLEAN DEFAULT FALSE, time_spent_minutes INTEGER DEFAULT 0, completed_at TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE(user_id, session_id))"))
+        # Get completed sessions
+        cur.execute(TABLE_SCHEMAS["session_progress"])
         cur.execute("SELECT count(DISTINCT session_id) FROM session_progress WHERE user_id=%s AND course_id=%s AND completed=true", (user["id"], cid))
         completed_sessions = cur.fetchone()["count"]
         
@@ -705,7 +721,7 @@ def get_dashboard_stats(user=Depends(get_current_user), db=Depends(get_db)):
                 course_map[sc["course_id"]]["total_sessions"] = sc["count"]
         
         # Get completed sessions for user
-        cur.execute(TABLE_SCHEMAS.get("session_progress", "CREATE TABLE IF NOT EXISTS session_progress (id TEXT PRIMARY KEY, user_id TEXT, session_id TEXT, course_id TEXT, module_id TEXT, completed BOOLEAN DEFAULT FALSE, time_spent_minutes INTEGER DEFAULT 0, completed_at TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE(user_id, session_id))"))
+        cur.execute(TABLE_SCHEMAS["session_progress"])
         cur.execute("""
             SELECT course_id, count(DISTINCT session_id) as count 
             FROM session_progress 
@@ -984,7 +1000,7 @@ def get_sessions(cid: str, mid: str, user=Depends(get_current_user), db=Depends(
     sessions = cur.fetchall()
     
     # Get progress
-    cur.execute(TABLE_SCHEMAS.get("session_progress", "CREATE TABLE IF NOT EXISTS session_progress (id TEXT PRIMARY KEY, user_id TEXT, session_id TEXT, course_id TEXT, module_id TEXT, completed BOOLEAN DEFAULT FALSE, time_spent_minutes INTEGER DEFAULT 0, completed_at TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE(user_id, session_id))"))
+    cur.execute(TABLE_SCHEMAS["session_progress"])
     cur.execute("SELECT session_id FROM session_progress WHERE user_id=%s AND course_id=%s AND module_id=%s AND completed=true", (user["id"], cid, mid))
     completed_ids = {row["session_id"] for row in cur.fetchall()}
     
@@ -1016,7 +1032,7 @@ def delete_session(sid: str, admin=Depends(require_admin), db=Depends(get_db)):
 @api_router.post("/sessions/{sid}/complete")
 def complete_session(sid: str, user=Depends(get_current_user), db=Depends(get_db)):
     cur = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute(TABLE_SCHEMAS.get("session_progress", "CREATE TABLE IF NOT EXISTS session_progress (id TEXT PRIMARY KEY, user_id TEXT, session_id TEXT, course_id TEXT, module_id TEXT, completed BOOLEAN DEFAULT FALSE, time_spent_minutes INTEGER DEFAULT 0, completed_at TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE(user_id, session_id))"))
+    cur.execute(TABLE_SCHEMAS["session_progress"])
     
     # Get session details
     cur.execute(TABLE_SCHEMAS["sessions"])
@@ -1049,7 +1065,7 @@ def complete_session(sid: str, user=Depends(get_current_user), db=Depends(get_db
 @api_router.get("/sessions/{sid}/progress")
 def get_session_progress(sid: str, user=Depends(get_current_user), db=Depends(get_db)):
     cur = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute(TABLE_SCHEMAS.get("session_progress", "CREATE TABLE IF NOT EXISTS session_progress (id TEXT PRIMARY KEY, user_id TEXT, session_id TEXT, course_id TEXT, module_id TEXT, completed BOOLEAN DEFAULT FALSE, time_spent_minutes INTEGER DEFAULT 0, completed_at TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE(user_id, session_id))"))
+    cur.execute(TABLE_SCHEMAS["session_progress"])
     cur.execute("SELECT * FROM session_progress WHERE user_id=%s AND session_id=%s", (user["id"], sid))
     progress = cur.fetchone()
     return progress or {"completed": False}
