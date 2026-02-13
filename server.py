@@ -1019,6 +1019,76 @@ def get_session(sid: str, db=Depends(get_db)):
         raise HTTPException(404, "Session not found")
     return session
 
+@api_router.put("/sessions/{sid}")
+async def update_session(
+    sid: str,
+    name: Optional[str] = Form(None),
+    duration_minutes: Optional[str] = Form(None),
+    content_type: Optional[str] = Form(None),
+    content_text: Optional[str] = Form(None),
+    quiz_id: Optional[str] = Form(None),
+    content_url: Optional[str] = Form(None),
+    is_document_available: Optional[str] = Form(None),
+    admin=Depends(require_admin),
+    db=Depends(get_db)
+):
+    cur = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    
+    # Check if session exists
+    cur.execute(TABLE_SCHEMAS["sessions"])
+    cur.execute("SELECT * FROM sessions WHERE id=%s", (sid,))
+    session = cur.fetchone()
+    if not session:
+        raise HTTPException(404, "Session not found")
+        
+    updates = []
+    values = []
+    
+    if name is not None:
+        updates.append("name=%s")
+        values.append(name)
+        
+    if duration_minutes is not None:
+        try:
+            duration = int(duration_minutes)
+            updates.append("duration_minutes=%s")
+            values.append(duration)
+        except:
+            pass
+            
+    if content_type is not None:
+        updates.append("content_type=%s")
+        values.append(content_type)
+        
+    if content_text is not None:
+        updates.append("content_text=%s")
+        values.append(content_text)
+        
+    if quiz_id is not None:
+        updates.append("quiz_id=%s")
+        values.append(quiz_id)
+        
+    if content_url is not None:
+        updates.append("content_url=%s")
+        values.append(content_url)
+        
+    if is_document_available is not None:
+        is_doc = is_document_available.lower() == "true"
+        updates.append("is_document_available=%s")
+        values.append(is_doc)
+        
+    if not updates:
+        return session
+        
+    values.append(sid)
+    query = f"UPDATE sessions SET {', '.join(updates)} WHERE id=%s RETURNING *"
+    
+    cur.execute(query, tuple(values))
+    updated_session = cur.fetchone()
+    db.commit()
+    
+    return updated_session
+
 @api_router.delete("/sessions/{sid}")
 def delete_session(sid: str, admin=Depends(require_admin), db=Depends(get_db)):
     cur = db.cursor()
@@ -1070,6 +1140,45 @@ def get_session_progress(sid: str, user=Depends(get_current_user), db=Depends(ge
     progress = cur.fetchone()
     return progress or {"completed": False}
 
+
+
+class QuizCreate(BaseModel):
+    title: str
+    course_id: Optional[str] = None
+    description: Optional[str] = None
+    questions: List[Dict[str, Any]] = []
+
+# ==================== QUIZZES ====================
+@api_router.get("/quizzes")
+def get_quizzes(course_id: Optional[str] = None, db=Depends(get_db)):
+    cur = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(TABLE_SCHEMAS["quizzes"])
+    
+    if course_id:
+        cur.execute("SELECT * FROM quizzes WHERE course_id=%s ORDER BY created_at DESC", (course_id,))
+    else:
+        cur.execute("SELECT * FROM quizzes ORDER BY created_at DESC")
+        
+    return cur.fetchall()
+
+@api_router.post("/quizzes")
+def create_quiz(
+    quiz_data: QuizCreate,
+    db=Depends(get_db)
+):
+    qid = generate_id()
+    cur = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(TABLE_SCHEMAS["quizzes"])
+    
+    cur.execute("""
+        INSERT INTO quizzes (id, title, course_id, questions)
+        VALUES (%s, %s, %s, %s)
+        RETURNING *
+    """, (qid, quiz_data.title, quiz_data.course_id, psycopg2.extras.Json(quiz_data.questions)))
+    
+    new_quiz = cur.fetchone()
+    db.commit()
+    return new_quiz
 
 
 # ==================== CATEGORIES ====================
